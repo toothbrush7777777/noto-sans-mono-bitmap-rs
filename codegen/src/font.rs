@@ -1,5 +1,5 @@
-use crate::unicode::UnicodeIter;
 use fontdue::{Font, FontSettings};
+use crate::SUPPORTED_UNICODE_RANGES;
 
 const NOTO_SANS_MONO_REGULAR: &[u8] = include_bytes!("res/NotoSansMono-Regular.ttf");
 const NOTO_SANS_MONO_BOLD: &[u8] = include_bytes!("res/NotoSansMono-Bold.ttf");
@@ -168,7 +168,8 @@ impl ToBitmapFont {
     /// bitmap can be reduced to HEIGHT x WIDTH instead of HEIGHT x HEIGHT, which
     /// would indicate a big space between all letters.
     fn find_max_width(font: &Font, font_size: f32) -> usize {
-        UnicodeIter::new()
+        SUPPORTED_UNICODE_RANGES.iter()
+            .flat_map(|x| x.iter())
             .filter(|x| x.is_visible_char())
             .map(|s| s.get_char())
             .map(|c| font.rasterize(c, font_size).0.width)

@@ -20,6 +20,8 @@
 #![deny(rustdoc::all)]
 #![allow(rustdoc::missing_doc_code_examples)]
 
+pub use crate::unicode::SUPPORTED_UNICODE_RANGES;
+
 pub mod font;
 pub mod unicode;
 
@@ -71,3 +73,9 @@ pub const CARGO_LIB_RS: &str = include_str!("codegen_templates/lib.rs.template.t
 
 /// Path into the main repository, where the codegen manipulates files.
 pub const CODEGEN_BASE_PATH: &str = "../src/";
+
+/*#[cfg(test)]
+mod tests {
+    use super::*;
+
+}*/

@@ -19,10 +19,9 @@
 #![allow(rustdoc::missing_doc_code_examples)]
 
 use codegen::font::{noto_font_by_weight, FontWeight, ToBitmapFont};
-use codegen::unicode::UnicodeIter;
 use codegen::{
     BitmapHeight, CARGO_LIB_RS, CARGO_TOML_TEMPLATE, CODEGEN_BASE_PATH, SIZE_MOD_TEMPLATE,
-    WEIGHT_MOD_TEMPLATE,
+    SUPPORTED_UNICODE_RANGES, WEIGHT_MOD_TEMPLATE,
 };
 use std::fmt::Write as FmtWrite;
 use std::fs::{create_dir, File};
@@ -327,42 +326,47 @@ fn codegen_font_weight_sub_modules(font: ToBitmapFont, weight: &FontWeight) {
     .unwrap();
     writeln!(&mut code_range_string, "    match c {{").unwrap();
 
-    UnicodeIter::new()
-        .filter(|s| s.is_visible_char())
-        .map(|s| s.get_char())
-        .map(|char| (char, font.rasterize_to_bitmap(char)))
-        .for_each(|(char, bitmap)| {
-            writeln!(
-                &mut code_range_string,
-                "        // letter: '{}' / {:?}",
-                char, char as usize as *const usize
-            )
-            .unwrap();
+    SUPPORTED_UNICODE_RANGES.iter().for_each(|range| {
+        range
+            .iter()
+            .filter(|x| x.is_visible_char())
+            .map(|x| x.get_char())
+            .map(|char| (char, font.rasterize_to_bitmap(char)))
+            .for_each(|(char, bitmap)| {
+                writeln!(
+                    &mut code_range_string,
+                    "        // letter: '{}' / {:?}",
+                    char, char as usize as *const usize
+                )
+                .unwrap();
+                writeln!(
+                    &mut code_range_string,
+                    "#[cfg(feature = \"{}\")]",
+                    range.feature_name
+                )
+                .unwrap();
 
-            if char == '\\' || char == '\'' {
-                writeln!(&mut code_range_string, "        '\\{}' => Some(&[", char).unwrap();
-            } else {
-                writeln!(&mut code_range_string, "        '{}' => Some(&[", char).unwrap()
-            }
-
-            for row in bitmap {
-                write!(&mut code_range_string, "            &[").unwrap();
-                for (i, byte) in row.iter().enumerate() {
-                    if i == row.len() - 1 {
-                        write!(&mut code_range_string, "{}", byte).unwrap();
-                    } else {
-                        write!(&mut code_range_string, "{}, ", byte).unwrap();
-                    }
+                if char == '\\' || char == '\'' {
+                    writeln!(&mut code_range_string, "        '\\{}' => Some(&[", char).unwrap();
+                } else {
+                    writeln!(&mut code_range_string, "        '{}' => Some(&[", char).unwrap()
                 }
-                writeln!(&mut code_range_string, "],").unwrap();
-            }
-            writeln!(&mut code_range_string, "        ]),").unwrap();
-        });
-    writeln!(
-        &mut code_range_string,
-        "        _ => None"
-    )
-    .unwrap();
+
+                for row in bitmap {
+                    write!(&mut code_range_string, "            &[").unwrap();
+                    for (i, byte) in row.iter().enumerate() {
+                        if i == row.len() - 1 {
+                            write!(&mut code_range_string, "{}", byte).unwrap();
+                        } else {
+                            write!(&mut code_range_string, "{}, ", byte).unwrap();
+                        }
+                    }
+                    writeln!(&mut code_range_string, "],").unwrap();
+                }
+                writeln!(&mut code_range_string, "        ]),").unwrap();
+            })
+    });
+    writeln!(&mut code_range_string, "        _ => None").unwrap();
     // close match
     writeln!(&mut code_range_string, "    }}").unwrap();
     // close function
