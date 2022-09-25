@@ -1,4 +1,4 @@
-use noto_sans_mono_bitmap::{BitmapHeight, FontWeight};
+use noto_sans_mono_bitmap::{RasterHeight, FontWeight};
 
 // small program that uses the library and ensures that the compiled doesn't throw anything away.
 // Thus, the library is definetely used and all code paths (=all input charactes) are valid.
@@ -8,6 +8,6 @@ fn main() {
     let _ = std::io::stdin().read_line(&mut line);
     let char = line.chars().next().unwrap();
 
-    let raster = noto_sans_mono_bitmap::get_bitmap(char, FontWeight::Regular, BitmapHeight::Size14).unwrap();
+    let raster = noto_sans_mono_bitmap::get_raster(char, FontWeight::Regular, RasterHeight::Size14).unwrap();
     println!("{raster:?}");
 }
