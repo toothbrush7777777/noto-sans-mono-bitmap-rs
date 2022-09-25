@@ -71,6 +71,13 @@ pub const SUPPORTED_UNICODE_RANGES: &[UnicodeRange] = &[
         end: 0x25ff,
         default_feature: false,
     },*/
+    // includes "�", i.e., the generic replacement character
+    UnicodeRange {
+        feature_name: "unicode-specials",
+        begin: 0xfff0,
+        end: 0xffff,
+        default_feature: false,
+    },
 ];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -122,14 +129,21 @@ impl<'a> Iterator for UnicodeRangeIter<'a> {
             // The basic-latin block contains some non-displayable symbols. I take care of them
             // here. Background: https://unicode-table.com/en/blocks/basic-latin/
             let symbol = match self.counter {
+                // non displayable symbols in ASCII range
                 0..=0x1f => UnicodeSymbol::Control,
-                0x20..=0x7e => UnicodeSymbol::Char(char::from_u32(self.counter).unwrap()),
                 0x7f => UnicodeSymbol::Control,
                 0x80..=0x9f => UnicodeSymbol::Control,
-                0xa0..=0xac => UnicodeSymbol::Char(char::from_u32(self.counter).unwrap()),
                 // soft hyphen
                 0xad => UnicodeSymbol::NonDisplayableSymbol(char::from_u32(self.counter).unwrap()),
-                0xae..=u32::MAX => UnicodeSymbol::Char(char::from_u32(self.counter).unwrap()),
+
+                // exceptions in "unicode-special"
+                0xfff0..=0xfff8 => {
+                    UnicodeSymbol::NonDisplayableSymbol(char::from_u32(self.counter).unwrap())
+                }
+                0xfffe..=0xffff => {
+                    UnicodeSymbol::NonDisplayableSymbol(char::from_u32(self.counter).unwrap())
+                }
+                _ => UnicodeSymbol::Char(char::from_u32(self.counter).unwrap()),
             };
             self.counter += 1;
             Some(symbol)
