@@ -18,10 +18,12 @@
 #![deny(rustdoc::all)]
 #![allow(rustdoc::missing_doc_code_examples)]
 
+use codegen::bytes_outsourcer::BytesToFileOutsourcer;
 use codegen::font::{noto_font_by_weight, FontWeight, ToBitmapFont};
 use codegen::{
-    BitmapHeight, CARGO_LIB_RS, CARGO_TOML_TEMPLATE, CODEGEN_BASE_PATH, SIZE_MOD_TEMPLATE,
-    SUPPORTED_UNICODE_RANGES, WEIGHT_MOD_TEMPLATE,
+    BitmapHeight, CARGO_LIB_RS, CARGO_TOML_TEMPLATE, CODEGEN_BASE_PATH,
+    CODEGEN_RASTERIZED_BYTES_PATH, SIZE_MOD_TEMPLATE, SUPPORTED_UNICODE_RANGES,
+    WEIGHT_MOD_TEMPLATE,
 };
 use std::fmt::Write as FmtWrite;
 use std::fs::{create_dir, File};
@@ -30,10 +32,14 @@ use std::path::PathBuf;
 
 /// Binary that does all the codegen.
 fn main() {
+    // Shared instance for the font rasterization of all characters. Ensures unique filenames
+    // so that I can `include!` the Rust definitions for the rasterized characters.
+    let mut bytes_outsourcer = BytesToFileOutsourcer::new(CODEGEN_RASTERIZED_BYTES_PATH);
+
     // create the font weight modules for each supported font weight.
     for weight in FontWeight::variants() {
         let font_bytes = noto_font_by_weight(weight);
-        codegen_font_weight_module(font_bytes, weight);
+        codegen_font_weight_module(font_bytes, weight, &mut bytes_outsourcer);
     }
 
     codegen_cargo_toml();
@@ -54,25 +60,82 @@ fn codegen_cargo_toml() {
         .open(path)
         .unwrap();
 
-    let mut font_weight_features_str = String::new();
+    let mut features_font_weights = String::new();
     FontWeight::variants().iter().for_each(|w| {
-        writeln!(&mut font_weight_features_str, "{} = []", w.mod_name()).unwrap();
+        writeln!(&mut features_font_weights, "{} = []", w.mod_name()).unwrap();
     });
 
-    let mut font_size_features_str = String::new();
+    let mut features_font_sizes = String::new();
     BitmapHeight::variants().iter().copied().for_each(|size| {
-        writeln!(&mut font_size_features_str, "size_{} = []", size.val()).unwrap();
+        writeln!(
+            &mut features_font_sizes,
+            "size_{} = []",
+            size.val()
+        )
+        .unwrap();
     });
 
-    let mut font_all_features_str = String::new();
-    writeln!(&mut font_all_features_str, "all = [").unwrap();
+    let mut features_unicode_ranges = String::new();
+    SUPPORTED_UNICODE_RANGES
+        .iter()
+        .map(|r| r.feature_name)
+        .for_each(|name| {
+            writeln!(&mut features_unicode_ranges, "{} = []", name).unwrap();
+        });
+
+    let mut features_font_styles_all = String::new();
+    writeln!(&mut features_font_styles_all, "styles_all = [").unwrap();
     FontWeight::variants().iter().for_each(|w| {
-        writeln!(&mut font_all_features_str, "    \"{}\",", w.mod_name()).unwrap();
+        writeln!(
+            &mut features_font_styles_all,
+            "    \"{}\",",
+            w.mod_name()
+        )
+        .unwrap();
     });
     BitmapHeight::variants().iter().for_each(|size| {
-        writeln!(&mut font_all_features_str, "    \"size_{}\",", size.val()).unwrap();
+        writeln!(
+            &mut features_font_styles_all,
+            "    \"size_{}\",",
+            size.val()
+        )
+        .unwrap();
     });
-    writeln!(&mut font_all_features_str, "]").unwrap();
+    writeln!(&mut features_font_styles_all, "]").unwrap();
+
+    let mut features_unicode_default = String::new();
+    writeln!(
+        &mut features_unicode_default,
+        "unicode_ranges_default = ["
+    )
+    .unwrap();
+    SUPPORTED_UNICODE_RANGES
+        .iter()
+        .filter(|r| r.default_feature)
+        .map(|r| r.feature_name)
+        .for_each(|name| {
+            writeln!(
+                &mut features_unicode_default,
+                "    \"{}\",",
+                name
+            )
+            .unwrap();
+        });
+    writeln!(&mut features_unicode_default, "]").unwrap();
+
+    let mut features_unicode_all = String::new();
+    writeln!(
+        &mut features_unicode_all,
+        "unicode_ranges_all = ["
+    )
+    .unwrap();
+    SUPPORTED_UNICODE_RANGES
+        .iter()
+        .map(|r| r.feature_name)
+        .for_each(|name| {
+            writeln!(&mut features_unicode_all, "    \"{}\",", name).unwrap();
+        });
+    writeln!(&mut features_unicode_all, "]").unwrap();
 
     // replace placeholders
     writeln!(
@@ -81,25 +144,43 @@ fn codegen_cargo_toml() {
         CARGO_TOML_TEMPLATE
             .replace(
                 "# %CODEGEN_FONT_WEIGHTS%",
-                font_weight_features_str.as_str()
+                features_font_weights.as_str()
             )
-            .replace("# %CODEGEN_FONT_SIZES%", font_size_features_str.as_str())
-            .replace("# %CODEGEN_FEATURE_ALL%", font_all_features_str.as_str())
+            .replace(
+                "# %CODEGEN_FONT_SIZES%",
+                features_font_sizes.as_str()
+            )
+            .replace(
+                "# %CODEGEN_UNICODE_RANGES%",
+                features_unicode_ranges.as_str()
+            )
+            .replace(
+                "# %CODEGEN_STYLES_FEATURE_ALL%",
+                features_font_styles_all.as_str()
+            )
+            .replace(
+                "# %CODEGEN_DEFAULT_UNICODE_FEATURES%",
+                features_unicode_default.as_str()
+            )
+            .replace(
+                "# %CODEGEN_ALL_UNICODE_FEATURES%",
+                features_unicode_all.as_str()
+            )
     )
     .unwrap();
 }
 
 /// Generates the lib.rs with all relevant features.
 fn codegen_lib_rs() {
-    let mut path = PathBuf::from(CODEGEN_BASE_PATH);
-    path.push("lib.rs");
+    let mut lib_rs_path = PathBuf::from(CODEGEN_BASE_PATH);
+    lib_rs_path.push("lib.rs");
 
     let mut cargo_toml_file = File::options()
         .create(true)
         .write(true)
         .append(false)
         .truncate(true)
-        .open(path)
+        .open(lib_rs_path)
         .unwrap();
 
     // codegen font weight modules
@@ -242,7 +323,11 @@ fn codegen_lib_rs() {
 }
 
 /// Creates a font weight module, like `bold/mod.rs`.
-fn codegen_font_weight_module(font_bytes: &[u8], weight: &FontWeight) {
+fn codegen_font_weight_module(
+    font_bytes: &[u8],
+    weight: &FontWeight,
+    outsourcer: &mut BytesToFileOutsourcer,
+) {
     let mut mod_file_path = PathBuf::from(CODEGEN_BASE_PATH);
     mod_file_path.push(weight.mod_name());
     // ignore error; dir might exist
@@ -271,74 +356,93 @@ fn codegen_font_weight_module(font_bytes: &[u8], weight: &FontWeight) {
         writeln!(&mut mod_file, "pub mod size_{};", size).unwrap();
 
         let font = ToBitmapFont::new(size, font_bytes);
-        codegen_font_weight_sub_modules(font, weight);
+        codegen_font_weight_sub_modules(font, weight, outsourcer);
     }
 }
 
-/// Creates `bold/size_10.rs` etc. and adds it to `bold/mod.rs`.
-fn codegen_font_weight_sub_modules(font: ToBitmapFont, weight: &FontWeight) {
-    let mut mod_file_path = PathBuf::from(CODEGEN_BASE_PATH);
-    mod_file_path.push(weight.mod_name());
-    mod_file_path.push(format!("size_{}.rs", font.bitmap_height()));
+/// Creates a `<weight>/size_<size>.rs` file performs all the code generation for the byte look-up of
+/// the pre-rasterized characters.
+fn codegen_font_weight_sub_modules(
+    font: ToBitmapFont,
+    weight: &FontWeight,
+    outsourcer: &mut BytesToFileOutsourcer,
+) {
+    // this block creates the file <weight>/size_<size>.rs and returns a File object to that file.
+    let mut size_mod_file = {
+        let mut mod_file_path = PathBuf::from(CODEGEN_BASE_PATH);
+        mod_file_path.push(weight.mod_name());
+        mod_file_path.push(format!("size_{}.rs", font.bitmap_height()));
 
-    let mut size_mod_file = File::options()
-        .create(true)
-        .write(true)
-        .append(false)
-        .truncate(true)
-        .open(mod_file_path)
+        File::options()
+            .create(true)
+            .write(true)
+            .append(false)
+            .truncate(true)
+            .open(mod_file_path)
+            .unwrap()
+    };
+
+    // this block prepares the head of the just generated file
+    {
+        writeln!(
+            &mut size_mod_file,
+            "{}",
+            SIZE_MOD_TEMPLATE
+                .replace("%FONT_WEIGHT%", weight.mod_name())
+                .replace("%FONT_SIZE%", &format!("{}", font.bitmap_height()))
+                .replace(
+                    "%CODEGEN_BITMAP_HEIGHT%",
+                    &format!("{}", font.bitmap_height())
+                )
+                .replace(
+                    "%CODEGEN_BITMAP_WIDTH%",
+                    &format!("{}", font.bitmap_width())
+                )
+        )
         .unwrap();
+    }
 
-    // replace placeholders
-    writeln!(
-        &mut size_mod_file,
-        "{}",
-        SIZE_MOD_TEMPLATE
-            .replace("%FONT_WEIGHT%", weight.mod_name())
-            .replace("%FONT_SIZE%", &format!("{}", font.bitmap_height()))
-            .replace(
-                "%CODEGEN_BITMAP_HEIGHT%",
-                &format!("{}", font.bitmap_height())
-            )
-            .replace(
-                "%CODEGEN_BITMAP_WIDTH%",
-                &format!("{}", font.bitmap_width())
-            )
-    )
-    .unwrap();
+    // the rest of the file generates the big match-block that maps characters to the pre-rasterized
+    // bytes.
 
-    // generate actual font bit map
-
+    // prepares the "get_char" function with it's match block
     let mut code_range_string = String::new();
-    writeln!(
-        &mut code_range_string,
-        "/// Returns the bitmap of the given character of the pre rendered\n\
+    {
+        writeln!(
+            &mut code_range_string,
+            "/// Returns the bitmap of the given character of the pre rendered\n\
         /// \"Noto Sans Mono\" raster for font weight {} and font size {}px",
-        weight.mod_name(),
-        font.font_size().round()
-    )
-    .unwrap();
-    writeln!(&mut code_range_string, "#[inline]").unwrap();
-    writeln!(
-        &mut code_range_string,
-        "pub const fn get_char(c: char) -> Option<&'static [&'static [u8]]> {{"
-    )
-    .unwrap();
-    writeln!(&mut code_range_string, "    match c {{").unwrap();
+            weight.mod_name(),
+            font.font_size().round()
+        )
+        .unwrap();
+        writeln!(&mut code_range_string, "#[inline]").unwrap();
+        writeln!(
+            &mut code_range_string,
+            "pub const fn get_char(c: char) -> Option<&'static [&'static [u8]]> {{"
+        )
+        .unwrap();
+        writeln!(&mut code_range_string, "    match c {{").unwrap();
+    }
 
+    // now we generate all the single match arms per character
+
+    // iterates through all ranges and for each range over all visible characters
     SUPPORTED_UNICODE_RANGES.iter().for_each(|range| {
         range
             .iter()
             .filter(|x| x.is_visible_char())
             .map(|x| x.get_char())
             .map(|char| (char, font.rasterize_to_bitmap(char)))
-            .for_each(|(char, bitmap)| {
+            .for_each(|(char, raster)| {
                 writeln!(
                     &mut code_range_string,
                     "        // letter: '{}' / {:?}",
                     char, char as usize as *const usize
                 )
                 .unwrap();
+
+                // make this character optional by it's unicode range
                 writeln!(
                     &mut code_range_string,
                     "#[cfg(feature = \"{}\")]",
@@ -346,24 +450,30 @@ fn codegen_font_weight_sub_modules(font: ToBitmapFont, weight: &FontWeight) {
                 )
                 .unwrap();
 
-                if char == '\\' || char == '\'' {
-                    writeln!(&mut code_range_string, "        '\\{}' => Some(&[", char).unwrap();
-                } else {
-                    writeln!(&mut code_range_string, "        '{}' => Some(&[", char).unwrap()
-                }
+                // generate source code representation of raster
+                let rust_raster_source_code = codegen_raster(&raster);
 
-                for row in bitmap {
-                    write!(&mut code_range_string, "            &[").unwrap();
-                    for (i, byte) in row.iter().enumerate() {
-                        if i == row.len() - 1 {
-                            write!(&mut code_range_string, "{}", byte).unwrap();
-                        } else {
-                            write!(&mut code_range_string, "{}, ", byte).unwrap();
-                        }
+                let outsourced_path =
+                    outsourcer.outsource_bytes(rust_raster_source_code.as_bytes());
+
+                // generate left side of the match arm
+                {
+                    if char == '\\' || char == '\'' {
+                        write!(&mut code_range_string, "        '\\{}'", char,).unwrap();
+                    } else {
+                        write!(&mut code_range_string, "        '{}'", char,).unwrap()
                     }
-                    writeln!(&mut code_range_string, "],").unwrap();
                 }
-                writeln!(&mut code_range_string, "        ]),").unwrap();
+                // generate right side of the match arm
+                {
+                    // this is (as the rest of the codegen stuff) very ugly.
+                    // need to adapt the path, so that cargo can find it during compilation..
+                    let path = format!(
+                        "../res_rasterized_characters/{}",
+                        outsourced_path.file_name().unwrap().to_str().unwrap()
+                    );
+                    writeln!(&mut code_range_string, "=> Some(include!(\"{}\")),", path).unwrap();
+                }
             })
     });
     writeln!(&mut code_range_string, "        _ => None").unwrap();
@@ -375,4 +485,43 @@ fn codegen_font_weight_sub_modules(font: ToBitmapFont, weight: &FontWeight) {
     size_mod_file
         .write_all(code_range_string.as_bytes())
         .unwrap();
+}
+
+/// Generates the Rust source code of type `&[&u8]]` from a raster.
+fn codegen_raster(raster: &Vec<Vec<u8>>) -> String {
+    let mut rust_byte_array_str = String::new();
+    writeln!(&mut rust_byte_array_str, "&[").unwrap();
+    for row in raster {
+        write!(&mut rust_byte_array_str, "    &[").unwrap();
+        for (i, byte) in row.iter().enumerate() {
+            if i == row.len() - 1 {
+                write!(&mut rust_byte_array_str, "{}", byte).unwrap();
+            } else {
+                write!(&mut rust_byte_array_str, "{}, ", byte).unwrap();
+            }
+        }
+        writeln!(&mut rust_byte_array_str, "],").unwrap();
+    }
+    write!(&mut rust_byte_array_str, "]").unwrap();
+    rust_byte_array_str
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_codegen_raster() {
+        let raster = [[1, 2, 3].to_vec(), [4, 5, 6].to_vec(), [7, 8, 9].to_vec()].to_vec();
+        let generated_source_code = codegen_raster(&raster);
+        assert_eq!(
+            "&[\n\
+            \x20\x20\x20\x20&[1, 2, 3],\n\
+            \x20\x20\x20\x20&[4, 5, 6],\n\
+            \x20\x20\x20\x20&[7, 8, 9],\n\
+            ]",
+            &generated_source_code
+        );
+    }
 }

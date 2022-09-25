@@ -12,6 +12,8 @@ cd "$DIR" || exit
 
 echo "This script generates the crate 'noto-sans-mono-bitmap', verifies the build, and applies Rustfmt and clippy afterwards."
 
+# delete all generated raster files from previous run; irrelevant anyway
+find src/res_rasterized_characters -type f -name "*.txt" -exec rm {} +
 cd "codegen" || exit
 # Needs rustc 1.58 or above
 cargo test
