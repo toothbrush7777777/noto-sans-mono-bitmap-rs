@@ -14,7 +14,7 @@ echo "This script generates the crate 'noto-sans-mono-bitmap', verifies the buil
 
 cd "codegen" || exit
 # Needs rustc 1.58 or above
-cargo +stable run --release --bin codegen
+RUSTFLAGS="-C target-cpu=native" cargo +stable run --release --bin codegen
 cd ..
 
 cargo fmt
