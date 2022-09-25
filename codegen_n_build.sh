@@ -22,6 +22,8 @@ RUSTFLAGS="-C target-cpu=native" cargo run --release --bin codegen
 cd ..
 
 cargo fmt
+# don't use "--all-targets" here; seems like it tests all other targets and not the lib
+cargo test --features all
 cargo clippy --features all  --all-targets
 cargo doc --features all
 cargo build --features all --all-targets
