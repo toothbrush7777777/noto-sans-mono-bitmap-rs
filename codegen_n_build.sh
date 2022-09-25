@@ -16,6 +16,7 @@ echo "This script generates the crate 'noto-sans-mono-bitmap', verifies the buil
 find src/res_rasterized_characters -type f -name "*.txt" -exec rm {} +
 cd "codegen" || exit
 # Needs rustc 1.58 or above
+cargo fmt
 cargo test
 RUSTFLAGS="-C target-cpu=native" cargo run --release --bin codegen
 cd ..

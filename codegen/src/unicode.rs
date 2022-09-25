@@ -1,5 +1,5 @@
 /// The unicode ranges that this library can generate.
-pub static SUPPORTED_UNICODE_RANGES: &[UnicodeRange] = &[
+pub const SUPPORTED_UNICODE_RANGES: &[UnicodeRange] = &[
     // ASCII
     UnicodeRange {
         feature_name: "unicode-basic-latin",
@@ -212,7 +212,6 @@ mod tests {
             _ => panic!(),
         };
 
-
         let mut iter2 = SUPPORTED_UNICODE_RANGES[1].iter();
         // skip cr1 control characters
         for _ in 0..32 {
@@ -235,12 +234,12 @@ mod tests {
     #[allow(non_snake_case)]
     #[test]
     fn test_SUPPORTED_UNICODE_RANGES_unique() {
-        SUPPORTED_UNICODE_RANGES.iter().enumerate().for_each(|r1|
-            SUPPORTED_UNICODE_RANGES.iter().enumerate()
+        SUPPORTED_UNICODE_RANGES.iter().enumerate().for_each(|r1| {
+            SUPPORTED_UNICODE_RANGES
+                .iter()
+                .enumerate()
                 .filter(|r2| r1.0 != r2.0)
-                .for_each(|r2|
-                assert_ne!(r1.1, r2.1)
-            )
-        )
+                .for_each(|r2| assert_ne!(r1.1, r2.1))
+        })
     }
 }

@@ -19,11 +19,10 @@
 #![allow(rustdoc::missing_doc_code_examples)]
 
 use codegen::bytes_outsourcer::BytesToFileOutsourcer;
-use codegen::font::{noto_font_by_weight, FontWeight, ToBitmapFont};
+use codegen::font::{noto_font_by_weight, FontWeight, ToBitmapFont, SUPPORTED_FONT_WEIGHTS};
 use codegen::{
-    BitmapHeight, CARGO_LIB_RS, CARGO_TOML_TEMPLATE, CODEGEN_BASE_PATH,
-    CODEGEN_RASTERIZED_BYTES_PATH, SIZE_MOD_TEMPLATE, SUPPORTED_UNICODE_RANGES,
-    WEIGHT_MOD_TEMPLATE,
+    CARGO_LIB_RS, CARGO_TOML_TEMPLATE, CODEGEN_BASE_PATH, CODEGEN_RASTERIZED_BYTES_PATH,
+    SIZE_MOD_TEMPLATE, SUPPORTED_RASTER_HEIGHTS, SUPPORTED_UNICODE_RANGES, WEIGHT_MOD_TEMPLATE,
 };
 use std::fmt::Write as FmtWrite;
 use std::fs::{create_dir, File};
@@ -37,7 +36,7 @@ fn main() {
     let mut bytes_outsourcer = BytesToFileOutsourcer::new(CODEGEN_RASTERIZED_BYTES_PATH);
 
     // create the font weight modules for each supported font weight.
-    for weight in FontWeight::variants() {
+    for weight in SUPPORTED_FONT_WEIGHTS {
         let font_bytes = noto_font_by_weight(weight);
         codegen_font_weight_module(font_bytes, weight, &mut bytes_outsourcer);
     }
@@ -61,18 +60,13 @@ fn codegen_cargo_toml() {
         .unwrap();
 
     let mut features_font_weights = String::new();
-    FontWeight::variants().iter().for_each(|w| {
+    SUPPORTED_FONT_WEIGHTS.iter().for_each(|w| {
         writeln!(&mut features_font_weights, "{} = []", w.mod_name()).unwrap();
     });
 
     let mut features_font_sizes = String::new();
-    BitmapHeight::variants().iter().copied().for_each(|size| {
-        writeln!(
-            &mut features_font_sizes,
-            "size_{} = []",
-            size.val()
-        )
-        .unwrap();
+    SUPPORTED_RASTER_HEIGHTS.iter().for_each(|size| {
+        writeln!(&mut features_font_sizes, "{} = []", size.feature_name()).unwrap();
     });
 
     let mut features_unicode_ranges = String::new();
@@ -83,52 +77,45 @@ fn codegen_cargo_toml() {
             writeln!(&mut features_unicode_ranges, "{} = []", name).unwrap();
         });
 
+    let mut features_font_styles_default = String::new();
+    writeln!(
+        &mut features_font_styles_default,
+        "font_weights_default = ["
+    )
+    .unwrap();
+    SUPPORTED_FONT_WEIGHTS
+        .iter()
+        .filter(|x| x.default_feature())
+        .for_each(|w| {
+            writeln!(
+                &mut features_font_styles_default,
+                "    \"{}\",",
+                w.mod_name()
+            )
+            .unwrap();
+        });
+    writeln!(&mut features_font_styles_default, "]").unwrap();
+
     let mut features_font_styles_all = String::new();
-    writeln!(&mut features_font_styles_all, "styles_all = [").unwrap();
-    FontWeight::variants().iter().for_each(|w| {
-        writeln!(
-            &mut features_font_styles_all,
-            "    \"{}\",",
-            w.mod_name()
-        )
-        .unwrap();
-    });
-    BitmapHeight::variants().iter().for_each(|size| {
-        writeln!(
-            &mut features_font_styles_all,
-            "    \"size_{}\",",
-            size.val()
-        )
-        .unwrap();
+    writeln!(&mut features_font_styles_all, "font_weights_all = [").unwrap();
+    SUPPORTED_FONT_WEIGHTS.iter().for_each(|w| {
+        writeln!(&mut features_font_styles_all, "    \"{}\",", w.mod_name()).unwrap();
     });
     writeln!(&mut features_font_styles_all, "]").unwrap();
 
     let mut features_unicode_default = String::new();
-    writeln!(
-        &mut features_unicode_default,
-        "unicode_ranges_default = ["
-    )
-    .unwrap();
+    writeln!(&mut features_unicode_default, "unicode_ranges_default = [").unwrap();
     SUPPORTED_UNICODE_RANGES
         .iter()
         .filter(|r| r.default_feature)
         .map(|r| r.feature_name)
         .for_each(|name| {
-            writeln!(
-                &mut features_unicode_default,
-                "    \"{}\",",
-                name
-            )
-            .unwrap();
+            writeln!(&mut features_unicode_default, "    \"{}\",", name).unwrap();
         });
     writeln!(&mut features_unicode_default, "]").unwrap();
 
     let mut features_unicode_all = String::new();
-    writeln!(
-        &mut features_unicode_all,
-        "unicode_ranges_all = ["
-    )
-    .unwrap();
+    writeln!(&mut features_unicode_all, "unicode_ranges_all = [").unwrap();
     SUPPORTED_UNICODE_RANGES
         .iter()
         .map(|r| r.feature_name)
@@ -137,35 +124,52 @@ fn codegen_cargo_toml() {
         });
     writeln!(&mut features_unicode_all, "]").unwrap();
 
+    let mut features_raster_heights_default = String::new();
+    writeln!(
+        &mut features_raster_heights_default,
+        "raster_heights_default = ["
+    )
+    .unwrap();
+    SUPPORTED_RASTER_HEIGHTS
+        .iter()
+        .filter(|r| r.default_feature())
+        .for_each(|size| {
+            writeln!(
+                &mut features_raster_heights_default,
+                "    \"{}\",",
+                size.feature_name()
+            )
+            .unwrap();
+        });
+    writeln!(&mut features_raster_heights_default, "]").unwrap();
+
+    let mut features_raster_heights_all = String::new();
+    writeln!(&mut features_raster_heights_all, "raster_heights_all = [").unwrap();
+    SUPPORTED_RASTER_HEIGHTS.iter().for_each(|size| {
+        writeln!(
+            &mut features_raster_heights_all,
+            "    \"{}\",",
+            size.feature_name()
+        )
+        .unwrap();
+    });
+    writeln!(&mut features_raster_heights_all, "]").unwrap();
+
     // replace placeholders
+    #[rustfmt::skip]
     writeln!(
         &mut cargo_toml_file,
         "{}",
         CARGO_TOML_TEMPLATE
-            .replace(
-                "# %CODEGEN_FONT_WEIGHTS%",
-                features_font_weights.as_str()
-            )
-            .replace(
-                "# %CODEGEN_FONT_SIZES%",
-                features_font_sizes.as_str()
-            )
-            .replace(
-                "# %CODEGEN_UNICODE_RANGES%",
-                features_unicode_ranges.as_str()
-            )
-            .replace(
-                "# %CODEGEN_STYLES_FEATURE_ALL%",
-                features_font_styles_all.as_str()
-            )
-            .replace(
-                "# %CODEGEN_DEFAULT_UNICODE_FEATURES%",
-                features_unicode_default.as_str()
-            )
-            .replace(
-                "# %CODEGEN_ALL_UNICODE_FEATURES%",
-                features_unicode_all.as_str()
-            )
+            .replace("# %CODEGEN_FONT_WEIGHTS%", features_font_weights.as_str())
+            .replace("# %CODEGEN_FONT_SIZES%", features_font_sizes.as_str())
+            .replace("# %CODEGEN_UNICODE_RANGES%", features_unicode_ranges.as_str())
+            .replace("# %CODEGEN_FEATURES_RASTER_HEIGHTS_DEFAULT%", features_raster_heights_default.as_str())
+            .replace("# %CODEGEN_FEATURES_RASTER_HEIGHTS_ALL%", features_raster_heights_all.as_str())
+            .replace("# %CODEGEN_FEATURES_WEIGHTS_DEFAULT%", features_font_styles_default.as_str())
+            .replace("# %CODEGEN_FEATURES_WEIGHTS_ALL%", features_font_styles_all.as_str())
+            .replace("# %CODEGEN_FEATURES_UNICODE_RANGES_DEFAULT%", features_unicode_default.as_str())
+            .replace("# %CODEGEN_FEATURES_UNICODE_RANGES_ALL%", features_unicode_all.as_str())
     )
     .unwrap();
 }
@@ -186,7 +190,7 @@ fn codegen_lib_rs() {
     // codegen font weight modules
     let mut weight_modules = String::new();
     {
-        FontWeight::variants().iter().for_each(|w| {
+        SUPPORTED_FONT_WEIGHTS.iter().for_each(|w| {
             writeln!(&mut weight_modules, "mod {};", w.mod_name()).unwrap();
         });
     }
@@ -194,32 +198,32 @@ fn codegen_lib_rs() {
     // codegen font weight variants
     let mut weight_variants = String::new();
     {
-        FontWeight::variants().iter().for_each(|w| {
+        SUPPORTED_FONT_WEIGHTS.iter().for_each(|w| {
             writeln!(
                 &mut weight_variants,
                 "    #[cfg(feature = \"{}\")]",
                 w.mod_name()
             )
             .unwrap();
-            writeln!(&mut weight_variants, "    {:?},", w).unwrap();
+            writeln!(&mut weight_variants, "    {:?},", w.name()).unwrap();
         });
     }
 
     // codegen font size enum variants
     let mut font_size_enum_variants = String::new();
     {
-        BitmapHeight::variants().iter().for_each(|size| {
+        SUPPORTED_RASTER_HEIGHTS.iter().for_each(|height| {
             writeln!(
                 &mut font_size_enum_variants,
-                "    #[cfg(feature = \"size_{}\")]",
-                size.val()
+                "    #[cfg(feature = \"{}\")]",
+                height.feature_name()
             )
             .unwrap();
             writeln!(
                 &mut font_size_enum_variants,
-                "    Size{:?} = {},",
-                size.val(),
-                size.val()
+                "    Size{} = {},",
+                height.value(),
+                height.value()
             )
             .unwrap();
         });
@@ -228,7 +232,7 @@ fn codegen_lib_rs() {
     // codegen get_bitmap match
     let mut get_bitmap_match = String::new();
     {
-        FontWeight::variants().iter().for_each(|w| {
+        SUPPORTED_FONT_WEIGHTS.iter().for_each(|w| {
             writeln!(
                 &mut get_bitmap_match,
                 "        #[cfg(feature = \"{}\")]",
@@ -238,22 +242,22 @@ fn codegen_lib_rs() {
             writeln!(
                 &mut get_bitmap_match,
                 "        FontWeight::{:?} => match size {{",
-                w
+                w.name()
             )
             .unwrap();
-            BitmapHeight::variants().iter().for_each(|size| {
+            SUPPORTED_RASTER_HEIGHTS.iter().for_each(|size| {
                 writeln!(
                     &mut get_bitmap_match,
-                    "            #[cfg(feature = \"size_{}\")]",
-                    size.val()
+                    "            #[cfg(feature = \"{}\")]",
+                    size.feature_name()
                 )
                 .unwrap();
                 writeln!(
                     &mut get_bitmap_match,
-                    "            BitmapHeight::{:?} => crate::{}::size_{}::get_char(c),",
-                    size,
+                    "            BitmapHeight::Size{:?} => crate::{}::size_{}::get_char(c),",
+                    size.value(),
                     w.mod_name(),
-                    size.val()
+                    size.value()
                 )
                 .unwrap();
             });
@@ -264,7 +268,7 @@ fn codegen_lib_rs() {
     // codegen get_bitmap_width match
     let mut get_bitmap_width_match = String::new();
     {
-        FontWeight::variants().iter().for_each(|w| {
+        SUPPORTED_FONT_WEIGHTS.iter().for_each(|w| {
             writeln!(
                 &mut get_bitmap_width_match,
                 "        #[cfg(feature = \"{}\")]",
@@ -274,22 +278,22 @@ fn codegen_lib_rs() {
             writeln!(
                 &mut get_bitmap_width_match,
                 "        FontWeight::{:?} => match size {{",
-                w
+                w.name()
             )
             .unwrap();
-            BitmapHeight::variants().iter().for_each(|size| {
+            SUPPORTED_RASTER_HEIGHTS.iter().for_each(|size| {
                 writeln!(
                     &mut get_bitmap_width_match,
-                    "            #[cfg(feature = \"size_{}\")]",
-                    size.val()
+                    "            #[cfg(feature = \"{}\")]",
+                    size.feature_name()
                 )
                 .unwrap();
                 writeln!(
                     &mut get_bitmap_width_match,
-                    "            BitmapHeight::{:?} => crate::{}::size_{}::BITMAP_WIDTH,",
-                    size,
+                    "            BitmapHeight::Size{} => crate::{}::size_{}::BITMAP_WIDTH,",
+                    size.value(),
                     w.mod_name(),
-                    size.val()
+                    size.value()
                 )
                 .unwrap();
             });
@@ -350,12 +354,12 @@ fn codegen_font_weight_module(
     )
     .unwrap();
 
-    for size in BitmapHeight::variants().iter().map(|x| x.val()) {
+    for size in SUPPORTED_RASTER_HEIGHTS.iter().map(|x| x.value()) {
         // add font modules for the font sizes
         writeln!(&mut mod_file, "#[cfg(feature = \"size_{}\")]", size).unwrap();
         writeln!(&mut mod_file, "pub mod size_{};", size).unwrap();
 
-        let font = ToBitmapFont::new(size, font_bytes);
+        let font = ToBitmapFont::new(size as usize, font_bytes);
         codegen_font_weight_sub_modules(font, weight, outsourcer);
     }
 }
